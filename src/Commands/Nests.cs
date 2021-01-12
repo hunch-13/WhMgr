@@ -15,23 +15,30 @@
     using ServiceStack.OrmLite;
 
     using WhMgr.Alarms.Alerts;
+    using WhMgr.Configuration;
     using WhMgr.Data;
     using WhMgr.Data.Models;
     using WhMgr.Diagnostics;
     using WhMgr.Extensions;
-    using WhMgr.Localization;
     using WhMgr.Geofence;
+    using WhMgr.Localization;
+    using WhMgr.Net.Webhooks;
+    using WhMgr.Osm;
     using WhMgr.Utilities;
 
-    public class Nests
+    public class Nests : BaseCommandModule
     {
         private static readonly IEventLogger _logger = EventLogger.GetLogger("NESTS", Program.LogLevel);
 
-        private readonly Dependencies _dep;
+        private readonly WhConfigHolder _whConfig;
+        private readonly WebhookController _whm;
+        private readonly OsmManager _osmManager;
 
-        public Nests(Dependencies dep)
+        public Nests(WhConfigHolder whConfig, WebhookController whm, OsmManager osmManager)
         {
-            _dep = dep;
+            _whConfig = whConfig;
+            _whm = whm;
+            _osmManager = osmManager;
         }
 
         [
@@ -42,14 +49,14 @@
         public async Task PostNestsAsync(CommandContext ctx,
             [Description("")] string args = null)
         {
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            if (!_whConfig.Instance.Servers.ContainsKey(guildId))
             {
                 await ctx.RespondEmbed(Translator.Instance.Translate("ERROR_NOT_IN_DISCORD_SERVER"), DiscordColor.Red);
                 return;
             }
 
-            var server = _dep.WhConfig.Servers[guildId];
+            var server = _whConfig.Instance.Servers[guildId];
             var channelId = server.NestsChannelId;
             var channel = await ctx.Client.GetChannelAsync(channelId);
             if (channel == null)
@@ -64,7 +71,7 @@
                 _logger.Warn($"Failed to delete messages in channel: {channelId}");
             }
 
-            var nests = GetNests(_dep.WhConfig.Database.Nests.ToString());
+            var nests = GetNests(_whConfig.Instance.Database.Nests.ToString());
             if (nests == null)
             {
                 await ctx.RespondEmbed(Translator.Instance.Translate("ERROR_NESTS_LIST").FormatText(ctx.User.Username));
@@ -131,7 +138,7 @@
                     try
                     {
                         var eb = GenerateNestMessage(guildId, ctx.Client, nest);
-                        var geofence = _dep.Whm.GetGeofence(guildId, nest.Latitude, nest.Longitude);
+                        var geofence = _whm.GetGeofence(guildId, nest.Latitude, nest.Longitude);
                         if (geofence == null)
                         {
                             //_logger.Warn($"Failed to find geofence for nest {nest.Key}.");
@@ -159,7 +166,7 @@
         {
             var alertMessageType = AlertMessageType.Nests;
             var alertMessage = /*alarm?.Alerts[alertMessageType] ??*/ AlertMessage.Defaults[alertMessageType]; // TODO: Add nestAlert config option
-            var server = _dep.WhConfig.Servers[guildId];
+            var server = _whConfig.Instance.Servers[guildId];
             var pokemonImageUrl = IconFetcher.Instance.GetPokemonIcon(server.IconStyle, nest.PokemonId);
             var properties = GetProperties(client.Guilds[guildId], nest, pokemonImageUrl);
             var eb = new DiscordEmbedBuilder
@@ -167,7 +174,10 @@
                 Title = DynamicReplacementEngine.ReplaceText(alertMessage.Title, properties),
                 Url = DynamicReplacementEngine.ReplaceText(alertMessage.Url, properties),
                 ImageUrl = DynamicReplacementEngine.ReplaceText(alertMessage.ImageUrl, properties),
-                ThumbnailUrl = DynamicReplacementEngine.ReplaceText(alertMessage.IconUrl, properties),
+                Thumbnail = new DiscordEmbedBuilder.EmbedThumbnail
+                {
+                    Url = DynamicReplacementEngine.ReplaceText(alertMessage.IconUrl, properties),
+                },
                 Description = DynamicReplacementEngine.ReplaceText(alertMessage.Content, properties),
                 Color = DiscordColor.Green,
                 Footer = new DiscordEmbedBuilder.EmbedFooter
@@ -192,11 +202,11 @@
             var gmapsLink = string.Format(Strings.GoogleMaps, nest.Latitude, nest.Longitude);
             var appleMapsLink = string.Format(Strings.AppleMaps, nest.Latitude, nest.Longitude);
             var wazeMapsLink = string.Format(Strings.WazeMaps, nest.Latitude, nest.Longitude);
-            var scannerMapsLink = string.Format(_dep.WhConfig.Urls.ScannerMap, nest.Latitude, nest.Longitude);
-            var staticMapLink = StaticMap.GetUrl(_dep.WhConfig.Urls.StaticMap, _dep.WhConfig.StaticMaps["nests"], nest.Latitude, nest.Longitude, pkmnImage, Net.Models.PokemonTeam.All, _dep.OsmManager.GetNest(nest.Name)?.FirstOrDefault());
-            var geofence = _dep.Whm.GetGeofence(guild.Id, nest.Latitude, nest.Longitude);
+            var scannerMapsLink = string.Format(_whConfig.Instance.Urls.ScannerMap, nest.Latitude, nest.Longitude);
+            var staticMapLink = StaticMap.GetUrl(_whConfig.Instance.Urls.StaticMap, _whConfig.Instance.StaticMaps["nests"], nest.Latitude, nest.Longitude, pkmnImage, Net.Models.PokemonTeam.All, _osmManager.GetNest(nest.Name)?.FirstOrDefault());
+            var geofence = _whm.GetGeofence(guild.Id, nest.Latitude, nest.Longitude);
             var city = geofence?.Name ?? "Unknown";
-            var address = new Location(null, city, nest.Latitude, nest.Longitude).GetAddress(_dep.WhConfig);
+            var address = new Location(null, city, nest.Latitude, nest.Longitude).GetAddress(_whConfig.Instance);
 
             var dict = new Dictionary<string, string>
             {
@@ -247,14 +257,14 @@
             var dict = new Dictionary<string, List<Nest>>();
             foreach (var nest in nests)
             {
-                var geofence = _dep.Whm.GetGeofence(guildId, nest.Latitude, nest.Longitude);
+                var geofence = _whm.GetGeofence(guildId, nest.Latitude, nest.Longitude);
                 if (geofence == null)
                 {
                     _logger.Warn($"Failed to find geofence for nest {nest.Name}.");
                     continue;
                 }
                 var geofenceName = geofence.Name;
-                var server = _dep.WhConfig.Servers[guildId];
+                var server = _whConfig.Instance.Servers[guildId];
                 var cities = server.CityRoles.Select(x => x.ToLower());
                 if (!cities.Contains(geofenceName.ToLower()))
                     continue;

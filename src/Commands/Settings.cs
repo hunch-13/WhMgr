@@ -10,6 +10,8 @@
     using DSharpPlus.CommandsNext.Attributes;
     using DSharpPlus.Entities;
 
+    using WhMgr.Configuration;
+    using WhMgr.Data.Subscriptions;
     using WhMgr.Extensions;
 
     [
@@ -19,13 +21,13 @@
         Hidden,
         RequirePermissions(Permissions.KickMembers)
     ]
-    public class Settings
+    public class Settings : BaseCommandModule
     {
-        private readonly Dependencies _dep;
+        private readonly WhConfigHolder _whConfig;
 
-        public Settings(Dependencies dep)
+        public Settings(WhConfigHolder whConfig)
         {
-            _dep = dep;
+            _whConfig = whConfig;
         }
 
         [
@@ -38,31 +40,31 @@
             [Description("")] string value)
         {
             // TODO: Provide list of available config options to set.
-            if (!await ctx.IsDirectMessageSupported(_dep.WhConfig))
+            if (!await ctx.IsDirectMessageSupported(_whConfig.Instance))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
-            if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+            if (!_whConfig.Instance.Servers.ContainsKey(guildId))
             {
                 // TODO: Localize
                 await ctx.RespondEmbed($"{ctx.User.Username} Guild {ctx.Guild?.Name} ({guildId}) not configured in {Strings.ConfigFileName}");
                 return;
             }
 
-            //var guildConfig = _dep.WhConfig.Servers[guildId];
+            //var guildConfig = _whConfig.Instance.Servers[guildId];
             switch (key)
             {
                 case "nest_channel":
                     // TODO: Validate nestChannelId
-                    //_dep.WhConfig.Servers[guildId].NestsChannelId = value;
-                    //_dep.WhConfig.Save(_dep.WhConfig.FileName);
+                    //_whConfig.Instance.Servers[guildId].NestsChannelId = value;
+                    //_whConfig.Instance.Save(_whConfig.Instance.FileName);
                     break;
                 case "prefix":
-                    var oldPrefix = _dep.WhConfig.Servers[guildId].CommandPrefix;
+                    var oldPrefix = _whConfig.Instance.Servers[guildId].CommandPrefix;
                     await ctx.RespondEmbed($"{ctx.User.Username} Command prefix changed from {oldPrefix} to {value}.", DiscordColor.Green);
-                    _dep.WhConfig.Servers[guildId].CommandPrefix = value;
-                    _dep.WhConfig.Save(_dep.WhConfig.FileName);
+                    _whConfig.Instance.Servers[guildId].CommandPrefix = value;
+                    _whConfig.Instance.Save(_whConfig.Instance.FileName);
                     break;
                 case "enable_cities":
                     if (!bool.TryParse(value, out var enableCities))
@@ -70,8 +72,8 @@
                         await ctx.RespondEmbed($"{ctx.User.Username}", DiscordColor.Red);
                         return;
                     }
-                    _dep.WhConfig.Servers[guildId].EnableCities = enableCities;
-                    _dep.WhConfig.Save(_dep.WhConfig.FileName);
+                    _whConfig.Instance.Servers[guildId].EnableCities = enableCities;
+                    _whConfig.Instance.Save(_whConfig.Instance.FileName);
                     break;
                 case "enable_subscriptions":
                     if (!bool.TryParse(value, out var enableSubscriptions))
@@ -79,8 +81,8 @@
                         await ctx.RespondEmbed($"{ctx.User.Username}", DiscordColor.Red);
                         return;
                     }
-                    _dep.WhConfig.Servers[guildId].Subscriptions.Enabled = enableSubscriptions;
-                    _dep.WhConfig.Save(_dep.WhConfig.FileName);
+                    _whConfig.Instance.Servers[guildId].Subscriptions.Enabled = enableSubscriptions;
+                    _whConfig.Instance.Save(_whConfig.Instance.FileName);
                     break;
                 case "cities_require_donor":
                     if (!bool.TryParse(value, out var citiesRequireDonor))
@@ -88,8 +90,8 @@
                         await ctx.RespondEmbed($"{ctx.User.Username}", DiscordColor.Red);
                         return;
                     }
-                    _dep.WhConfig.Servers[guildId].CitiesRequireSupporterRole = citiesRequireDonor;
-                    _dep.WhConfig.Save(_dep.WhConfig.FileName);
+                    _whConfig.Instance.Servers[guildId].CitiesRequireSupporterRole = citiesRequireDonor;
+                    _whConfig.Instance.Save(_whConfig.Instance.FileName);
                     break;
                 case "prune_quests":
                     if (!bool.TryParse(value, out var pruneQuests))
@@ -97,17 +99,17 @@
                         await ctx.RespondEmbed($"{ctx.User.Username}", DiscordColor.Red);
                         return;
                     }
-                    _dep.WhConfig.Servers[guildId].PruneQuestChannels = pruneQuests;
-                    _dep.WhConfig.Save(_dep.WhConfig.FileName);
+                    _whConfig.Instance.Servers[guildId].PruneQuestChannels = pruneQuests;
+                    _whConfig.Instance.Save(_whConfig.Instance.FileName);
                     break;
                 case "icon_style":
-                    if (!_dep.WhConfig.IconStyles.ContainsKey(value))
+                    if (!_whConfig.Instance.IconStyles.ContainsKey(value))
                     {
                         await ctx.RespondEmbed($"{ctx.User.Username}", DiscordColor.Red);
                         return;
                     }
-                    _dep.WhConfig.Servers[guildId].IconStyle = value;
-                    _dep.WhConfig.Save(_dep.WhConfig.FileName);
+                    _whConfig.Instance.Servers[guildId].IconStyle = value;
+                    _whConfig.Instance.Save(_whConfig.Instance.FileName);
                     break;
                 case "shiny_stats":
                     if (!bool.TryParse(value, out var enableShinyStats))
@@ -115,8 +117,8 @@
                         await ctx.RespondEmbed($"{ctx.User.Username}", DiscordColor.Red);
                         return;
                     }
-                    _dep.WhConfig.Servers[guildId].ShinyStats.Enabled = enableShinyStats;
-                    _dep.WhConfig.Save(_dep.WhConfig.FileName);
+                    _whConfig.Instance.Servers[guildId].ShinyStats.Enabled = enableShinyStats;
+                    _whConfig.Instance.Save(_whConfig.Instance.FileName);
                     break;
             }
             await Task.CompletedTask;
@@ -129,19 +131,19 @@
         ]
         public async Task ListSettingsAsync(CommandContext ctx)
         {
-            if (!await ctx.IsDirectMessageSupported(_dep.WhConfig))
+            if (!await ctx.IsDirectMessageSupported(_whConfig.Instance))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
-            if (!_dep.WhConfig.Servers.ContainsKey(ctx.Guild?.Id ?? 0))
+            if (!_whConfig.Instance.Servers.ContainsKey(ctx.Guild?.Id ?? 0))
             {
                 // TODO: Localize
                 await ctx.RespondEmbed($"{ctx.User.Username} Guild {ctx.Guild?.Name} ({guildId}) not configured in {Strings.ConfigFileName}");
                 return;
             }
 
-            var guildConfig = _dep.WhConfig.Servers[guildId];
+            var guildConfig = _whConfig.Instance.Servers[guildId];
             var eb = new DiscordEmbedBuilder
             {
                 Color = DiscordColor.Blurple,
@@ -181,11 +183,13 @@
         ]
         public class CityRoles
         {
-            private readonly Dependencies _dep;
+            private readonly WhConfigHolder _whConfig;
+            private readonly SubscriptionProcessor _subProcessor;
 
-            public CityRoles(Dependencies dep)
+            public CityRoles(WhConfigHolder whConfig, SubscriptionProcessor subProcessor)
             {
-                _dep = dep;
+                _whConfig = whConfig;
+                _subProcessor = subProcessor;
             }
 
             [
@@ -195,19 +199,19 @@
             ]
             public async Task ListAsync(CommandContext ctx)
             {
-                if (!await ctx.IsDirectMessageSupported(_dep.WhConfig))
+                if (!await ctx.IsDirectMessageSupported(_whConfig.Instance))
                     return;
 
-                var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+                var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
-                if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+                if (!_whConfig.Instance.Servers.ContainsKey(guildId))
                 {
                     // TODO: Localize
                     await ctx.RespondEmbed($"{ctx.User.Username} Guild {ctx.Guild?.Name} ({guildId}) not configured in {Strings.ConfigFileName}", DiscordColor.Red);
                     return;
                 }
 
-                var guildConfig = _dep.WhConfig.Servers[guildId];
+                var guildConfig = _whConfig.Instance.Servers[guildId];
                 var eb = new DiscordEmbedBuilder
                 {
                     Color = DiscordColor.Blurple,
@@ -230,23 +234,23 @@
             public async Task AddAsync(CommandContext ctx,
                 [Description(""), RemainingText] string roleNames)
             {
-                if (!await ctx.IsDirectMessageSupported(_dep.WhConfig))
+                if (!await ctx.IsDirectMessageSupported(_whConfig.Instance))
                     return;
 
-                var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+                var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
-                if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+                if (!_whConfig.Instance.Servers.ContainsKey(guildId))
                 {
                     // TODO: Localize
                     await ctx.RespondEmbed($"{ctx.User.Username} Guild {ctx.Guild?.Name} ({guildId}) not configured in {Strings.ConfigFileName}", DiscordColor.Red);
                     return;
                 }
 
-                var guildConfig = _dep.WhConfig.Servers[guildId];
+                var guildConfig = _whConfig.Instance.Servers[guildId];
 
                 var rolesAdded = new List<string>();
                 var rolesFailed = new List<string>();
-                var guildRoleNames = ctx.Guild.Roles.Select(x => x.Name.ToLower()).ToList();
+                var guildRoleNames = ctx.Guild.Roles.Select(x => x.Value.Name.ToLower()).ToList();
                 var split = roleNames.Split(',');
                 for (var i = 0; i < split.Length; i++)
                 {
@@ -260,8 +264,8 @@
                     rolesFailed.Add(roleName);
                 }
 
-                _dep.WhConfig.Servers[guildId].CityRoles.AddRange(rolesAdded);
-                _dep.WhConfig.Save(_dep.WhConfig.FileName);
+                _whConfig.Instance.Servers[guildId].CityRoles.AddRange(rolesAdded);
+                _whConfig.Instance.Save(_whConfig.Instance.FileName);
 
                 // TODO: Localize
                 var message = $"{ctx.User.Username} Successfully added the following roles: {string.Join(", ", rolesAdded)}";
@@ -282,19 +286,19 @@
             public async Task RemoveAsync(CommandContext ctx,
                 [Description(""), RemainingText] string roleNames)
             {
-                if (!await ctx.IsDirectMessageSupported(_dep.WhConfig))
+                if (!await ctx.IsDirectMessageSupported(_whConfig.Instance))
                     return;
 
-                var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+                var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
-                if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+                if (!_whConfig.Instance.Servers.ContainsKey(guildId))
                 {
                     // TODO: Localize
                     await ctx.RespondEmbed($"{ctx.User.Username} Guild {ctx.Guild?.Name} ({guildId}) not configured in {Strings.ConfigFileName}", DiscordColor.Red);
                     return;
                 }
 
-                var guildConfig = _dep.WhConfig.Servers[guildId];
+                var guildConfig = _whConfig.Instance.Servers[guildId];
 
                 var rolesRemoved = new List<string>();
                 var rolesFailed = new List<string>();
@@ -311,8 +315,8 @@
                     rolesFailed.Add(roleName);
                 }
 
-                rolesRemoved.ForEach(x => _dep.WhConfig.Servers[guildId].CityRoles.Remove(x));
-                _dep.WhConfig.Save(_dep.WhConfig.FileName);
+                rolesRemoved.ForEach(x => _whConfig.Instance.Servers[guildId].CityRoles.Remove(x));
+                _whConfig.Instance.Save(_whConfig.Instance.FileName);
 
                 // TODO: Localize
                 var message = $"{ctx.User.Username} Successfully removed the following roles: {string.Join(", ", rolesRemoved)}";

@@ -1,33 +1,32 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-
-using DSharpPlus.CommandsNext;
-using DSharpPlus.CommandsNext.Attributes;
-using DSharpPlus.Entities;
-using DSharpPlus.Interactivity;
-
-using WhMgr.Diagnostics;
-using WhMgr.Extensions;
-using WhMgr.Localization;
-using WhMgr.Net.Webhooks;
-
-namespace WhMgr.Commands
+﻿namespace WhMgr.Commands
 {
-    public class Areas
+    using System;
+    using System.Collections.Generic;
+    using System.Linq;
+    using System.Text;
+    using System.Threading.Tasks;
+
+    using DSharpPlus.CommandsNext;
+    using DSharpPlus.CommandsNext.Attributes;
+    using DSharpPlus.Entities;
+    using DSharpPlus.Interactivity;
+
+    using WhMgr.Configuration;
+    using WhMgr.Diagnostics;
+    using WhMgr.Extensions;
+    using WhMgr.Net.Webhooks;
+
+    public class Areas : BaseCommandModule
     {
         private static readonly IEventLogger _logger = EventLogger.GetLogger("AREAS", Program.LogLevel);
 
-        private readonly Dependencies _dep;
+        private readonly WhConfigHolder _whConfig;
+        private readonly WebhookController _whm;
 
-        public Areas(Dependencies dep)
+        public Areas(WhConfigHolder whConfig, WebhookController whm)
         {
-            _dep = dep;
-
+            _whConfig = whConfig;
+            _whm = whm;
         }
 
         [
@@ -37,26 +36,23 @@ namespace WhMgr.Commands
         ]
         public async Task SendPaginated(CommandContext ctx)
         {
-            if (!await ctx.IsDirectMessageSupported(_dep.WhConfig))
+            if (!await ctx.IsDirectMessageSupported(_whConfig.Instance))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            if (!_whConfig.Instance.Servers.ContainsKey(guildId))
                 return;
 
-            var server = _dep.WhConfig.Servers[guildId];
+            var server = _whConfig.Instance.Servers[guildId];
+            var geofences = _whm.GetServerGeofences(guildId);
+            var areas = geofences.Select(geofence => geofence.Name).OrderBy(Name => Name).ToList();
 
-            var geofences = _dep.Whm.GetServerGeofences(guildId);
-
-            List<string> areas = geofences.Select(geofence => geofence.Name).OrderBy(Name => Name).ToList();
-
-
-            var interactivity = ctx.Client.GetInteractivityModule();
-            List<Page> pages = new List<Page>();
-            int pagelength = 0;
+            var interactivity = (InteractivityExtension)ctx.Services.GetService(typeof(InteractivityExtension));
+            var pages = new List<Page>();
+            var pagelength = 0;
             var psb = new StringBuilder();
-            int linesThisPage = 0;
-            int num = 1;
+            var linesThisPage = 0;
+            var num = 1;
             var title = string.Format("Page {0}", (object)num);
             foreach (var line in areas.Select(area => $"- {area}\n"))
             {
@@ -97,10 +93,7 @@ namespace WhMgr.Commands
                 pages.Add(new Page { Embed = eb });
             }
 
-            await interactivity.SendPaginatedMessage(ctx.Channel, ctx.User, pages, timeoutoverride: TimeSpan.FromMinutes(5));
+            await interactivity.SendPaginatedMessageAsync(ctx.Channel, ctx.User, pages, timeoutoverride: TimeSpan.FromMinutes(5));
         }
-
     }
-
-
 }

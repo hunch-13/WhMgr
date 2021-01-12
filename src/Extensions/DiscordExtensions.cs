@@ -74,29 +74,25 @@
             return messagesSent;
         }
 
-        public static async Task<DiscordMessage> SendDirectMessage(this DiscordClient client, DiscordUser user, DiscordEmbed embed)
+        public static async Task<DiscordMessage> SendDirectMessage(this DiscordMember member, DiscordEmbed embed)
         {
             if (embed == null)
                 return null;
 
-            return await client.SendDirectMessage(user, string.Empty, embed);
+            return await member.SendDirectMessage(string.Empty, embed);
         }
 
-        public static async Task<DiscordMessage> SendDirectMessage(this DiscordClient client, DiscordUser user, string message, DiscordEmbed embed)
+        public static async Task<DiscordMessage> SendDirectMessage(this DiscordMember member, string message, DiscordEmbed embed)
         {
             try
             {
-                var dm = await client.CreateDmAsync(user);
-                if (dm != null)
-                {
-                    var msg = await dm.SendMessageAsync(message, false, embed);
-                    return msg;
-                }
+                var msg = await member.SendMessageAsync(message, false, embed);
+                return msg;
             }
             catch (Exception)
             {
                 //_logger.Error(ex);
-                _logger.Error($"Failed to send DM to user {user.Username}.");
+                _logger.Error($"Failed to send DM to user {member.Username}.");
             }
 
             return null;
@@ -154,7 +150,7 @@
             DiscordMember member = null;
             try
             {
-                member = members?.FirstOrDefault(x => x.Id == id);
+                member = members?.FirstOrDefault(x => x.Key == id).Value;
             }
             catch { }
             if (member == null)
@@ -294,7 +290,7 @@
                 return false;
 
             var guild = client.Guilds[guildId];
-            var member = guild.Members.FirstOrDefault(x => x.Id == userId);
+            var member = guild.Members.FirstOrDefault(x => x.Key == userId).Value;
             if (member == null)
             {
                 _logger.Error($"Failed to get user with id {userId}.");
@@ -357,7 +353,7 @@
 
         public static DiscordRole GetRoleFromName(this DiscordGuild guild, string roleName)
         {
-            return guild?.Roles.FirstOrDefault(x => string.Compare(x.Name, roleName, true) == 0);
+            return guild?.Roles.FirstOrDefault(x => string.Compare(x.Value.Name, roleName, true) == 0).Value;
         }
 
         #endregion
@@ -419,7 +415,7 @@
         public static async Task<bool> Confirm(this CommandContext ctx, string message)
         {
             await ctx.RespondEmbed(message);
-            var interactivity = ctx.Client.GetModule<InteractivityModule>();
+            var interactivity = (InteractivityExtension)ctx.Services.GetService(typeof(InteractivityExtension));
             if (interactivity == null)
             {
                 _logger.Error("Interactivity model failed to load!");
@@ -432,7 +428,7 @@
                 && Regex.IsMatch(x.Content, ConfirmRegex), 
                 TimeSpan.FromMinutes(2));
 
-            return Regex.IsMatch(m.Message.Content, YesRegex);
+            return Regex.IsMatch(m.Result?.Content, YesRegex);
         }
 
         #region Colors

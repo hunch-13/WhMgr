@@ -10,18 +10,20 @@
     using DSharpPlus.CommandsNext.Attributes;
     using DSharpPlus.Entities;
 
+    using WhMgr.Configuration;
     using WhMgr.Diagnostics;
     using WhMgr.Extensions;
     using WhMgr.Localization;
 
-    public class Quests
+    public class Quests : BaseCommandModule
     {
         private static readonly IEventLogger _logger = EventLogger.GetLogger("QUESTS", Program.LogLevel);
-        private readonly Dependencies _dep;
 
-        public Quests(Dependencies dep)
+        private readonly WhConfigHolder _whConfig;
+
+        public Quests(WhConfigHolder whConfig)
         {
-            _dep = dep;
+            _whConfig = whConfig;
         }
 
         [
@@ -32,11 +34,11 @@
         public async Task ResetChannelAsync(CommandContext ctx,
             [Description("Discord channel to reset.")] DiscordChannel channel = null)
         {
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
             if (channel == null)
             {
-                var channelIds = _dep.WhConfig.Servers[guildId].QuestChannelIds;
+                var channelIds = _whConfig.Instance.Servers[guildId].QuestChannelIds;
                 for (var i = 0; i < channelIds.Count; i++)
                 {
                     var qChannel = await ctx.Client.GetChannelAsync(channelIds[i]);

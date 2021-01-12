@@ -12,6 +12,7 @@
 
     using ServiceStack.OrmLite;
 
+    using WhMgr.Configuration;
     using WhMgr.Extensions;
     using WhMgr.Localization;
 
@@ -22,14 +23,15 @@
         Hidden,
         RequirePermissions(Permissions.KickMembers)
     ]
-    public class Gyms
+    public class Gyms : BaseCommandModule
     {
         //private static readonly IEventLogger _logger = EventLogger.GetLogger("GYMS", Program.LogLevel);
-        private readonly Dependencies _dep;
 
-        public Gyms(Dependencies dep)
+        private readonly WhConfigHolder _whConfig;
+
+        public Gyms(WhConfigHolder whConfig)
         {
-            _dep = dep;
+            _whConfig = whConfig;
         }
 
         [
@@ -39,7 +41,7 @@
         public async Task ConvertedPokestopsToGymsAsync(CommandContext ctx,
             [Description("Real or dry run check (y/n)")] string yesNo = "y")
         {
-            using (var db = Data.DataAccessLayer.CreateFactory(_dep.WhConfig.Database.Scanner.ToString()).Open())
+            using (var db = Data.DataAccessLayer.CreateFactory(_whConfig.Instance.Database.Scanner.ToString()).Open())
             {
                 //Select query where ids match for pokestops and gyms
                 var convertedGyms = db.Select<Data.Models.Pokestop>(Strings.SQL_SELECT_CONVERTED_POKESTOPS);

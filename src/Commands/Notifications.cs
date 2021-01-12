@@ -13,6 +13,7 @@ namespace WhMgr.Commands
     using DSharpPlus.CommandsNext;
     using DSharpPlus.CommandsNext.Attributes;
     using DSharpPlus.Entities;
+    using DSharpPlus.Interactivity;
     using Newtonsoft.Json;
 
     using WhMgr.Commands.Input;
@@ -26,15 +27,19 @@ namespace WhMgr.Commands
     using WhMgr.Net.Models;
     using WhMgr.Utilities;
 
-    public class Notifications
+    public class Notifications : BaseCommandModule
     {
         private static readonly IEventLogger _logger = EventLogger.GetLogger("NOTIFICATIONS", Program.LogLevel);
 
-        private readonly Dependencies _dep;
+        private readonly WhConfigHolder _whConfig;
+        private readonly SubscriptionProcessor _subProcessor;
+        private readonly StripeService _stripe;
 
-        public Notifications(Dependencies dep)
+        public Notifications(WhConfigHolder whConfig, SubscriptionProcessor subProcessor, StripeService stripe)
         {
-            _dep = dep;
+            _whConfig = whConfig;
+            _subProcessor = subProcessor;
+            _stripe = stripe;
         }
 
         #region General
@@ -49,14 +54,14 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
             if (string.IsNullOrEmpty(mention))
             {
-                await SendUserSubscriptionSettings(ctx.Client, ctx.User, ctx.User, guildId);
+                await SendUserSubscriptionSettings(ctx.Client, ctx.Member, ctx.User, guildId);
                 return;
             }
 
-            var isModOrHigher = await ctx.Client.IsModeratorOrHigher(ctx.User.Id, guildId, _dep.WhConfig);
+            var isModOrHigher = await ctx.Client.IsModeratorOrHigher(ctx.User.Id, guildId, _whConfig.Instance);
             if (!isModOrHigher)
             {
                 await ctx.RespondEmbed(Translator.Instance.Translate("MSG_NOT_MODERATOR_OR_HIGHER").FormatText(ctx.User.Mention), DiscordColor.Red);
@@ -77,9 +82,9 @@ namespace WhMgr.Commands
                 return;
             }
 
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
 
-            await SendUserSubscriptionSettings(ctx.Client, ctx.User, user, guildId);
+            await SendUserSubscriptionSettings(ctx.Client, ctx.Member, user, guildId);
         }
 
         [
@@ -93,7 +98,7 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
             if (string.IsNullOrEmpty(mention))
             {
@@ -101,7 +106,7 @@ namespace WhMgr.Commands
                 return;
             }
 
-            var isModOrHigher = await ctx.Client.IsModeratorOrHigher(ctx.User.Id, guildId, _dep.WhConfig);
+            var isModOrHigher = await ctx.Client.IsModeratorOrHigher(ctx.User.Id, guildId, _whConfig.Instance);
             if (!isModOrHigher)
             {
                 await ctx.RespondEmbed(Translator.Instance.Translate("MSG_NOT_MODERATOR_OR_HIGHER").FormatText(ctx.User.Mention), DiscordColor.Red);
@@ -124,7 +129,7 @@ namespace WhMgr.Commands
 
             await EnableDisableUserSubscriptions(ctx, user, guildId);
 
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         [
@@ -138,7 +143,7 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
             var parts = coordinates.Replace(" ", null).Split(',');
             if (!double.TryParse(parts[0], out var lat) || !double.TryParse(parts[1], out var lng))
@@ -147,7 +152,7 @@ namespace WhMgr.Commands
                 return;
             }
 
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             if (subscription == null)
             {
                 await ctx.RespondEmbed(Translator.Instance.Translate("MSG_USER_NOT_SUBSCRIBED").FormatText(ctx.User.Username), DiscordColor.Red);
@@ -160,7 +165,7 @@ namespace WhMgr.Commands
             subscription.Save();
 
             await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_DISTANCE_SET").FormatText(ctx.User.Username, distance, lat, lng));
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         [
@@ -173,13 +178,13 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
             // Check if user is in list of acceptable users to receive Pokemon text message notifications
-            if (!_dep.WhConfig.Twilio.UserIds.Contains(ctx.User.Id))
+            if (!_whConfig.Instance.Twilio.UserIds.Contains(ctx.User.Id))
                 return;
 
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             if (subscription == null)
             {
                 await ctx.RespondEmbed(Translator.Instance.Translate("MSG_USER_NOT_SUBSCRIBED").FormatText(ctx.User.Username), DiscordColor.Red);
@@ -190,7 +195,7 @@ namespace WhMgr.Commands
             subscription.Save();
 
             await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_PHONE_NUMBER_SET").FormatText(ctx.User.Username, phoneNumber));
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         [
@@ -203,10 +208,10 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
             var message = BuildExpirationMessage(guildId, ctx.User);
-            await ctx.Client.SendDirectMessage(ctx.User, message);
+            await ctx.Member.SendDirectMessage(message);
         }
 
         [
@@ -227,10 +232,10 @@ namespace WhMgr.Commands
                 return;
             }
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
             var user = await ctx.Client.GetUserAsync(realUserId);
             var message = BuildExpirationMessage(guildId, user);
-            await ctx.Client.SendDirectMessage(ctx.User, message);
+            await ctx.Member.SendDirectMessage(message);
         }
 
         #endregion
@@ -251,11 +256,11 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            if (!_whConfig.Instance.Servers.ContainsKey(guildId))
                 return;
 
-            var server = _dep.WhConfig.Servers[guildId];
+            var server = _whConfig.Instance.Servers[guildId];
 
             //if (!int.TryParse(cpArg, out int cp))
             //{
@@ -358,9 +363,9 @@ namespace WhMgr.Commands
                 }
             }
 
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
 
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             // Check subscription limits
             if (server.Subscriptions.MaxPokemonSubscriptions > 0 && subscription.Pokemon.Count >= server.Subscriptions.MaxPokemonSubscriptions)
             {
@@ -371,7 +376,7 @@ namespace WhMgr.Commands
 
             var alreadySubscribed = new List<string>();
             var subscribed = new List<string>();
-            var isModOrHigher = await ctx.Client.IsModeratorOrHigher(ctx.User.Id, guildId, _dep.WhConfig);
+            var isModOrHigher = await ctx.Client.IsModeratorOrHigher(ctx.User.Id, guildId, _whConfig.Instance);
             // Validate the provided pokemon list
             var validation = PokemonValidation.Validate(poke);
             if (validation == null || validation.Valid.Count == 0)
@@ -492,7 +497,7 @@ namespace WhMgr.Commands
                     : string.Empty)
             );
 
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         [
@@ -506,8 +511,8 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             if (subscription == null || subscription?.Pokemon?.Count == 0)
             {
                 await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_NO_POKEMON_SUBSCRIPTIONS").FormatText(ctx.User.Username), DiscordColor.Red);
@@ -525,7 +530,7 @@ namespace WhMgr.Commands
                 // Loop through all Pokemon subscriptions and remove them
                 subscription.Pokemon.ForEach(x => x.Id.Remove<PokemonSubscription>());
                 await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_SUCCESS_REMOVE_ALL_POKEMON_SUBSCRIPTIONS").FormatText(ctx.User.Username));
-                _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+                _subProcessor.Manager.ReloadSubscriptions();
                 return;
             }
 
@@ -536,7 +541,7 @@ namespace WhMgr.Commands
                 return;
             }
 
-            var areas = SubscriptionAreas.GetAreas(_dep.WhConfig.Servers[guildId], city);
+            var areas = SubscriptionAreas.GetAreas(_whConfig.Instance.Servers[guildId], city);
             var pokemonNames = validation.Valid.Select(x => MasterFile.Instance.Pokedex[x.Key].Name + (string.IsNullOrEmpty(x.Value) ? string.Empty : "-" + x.Value));
             var error = false;
             foreach (var (pokemonId, form) in validation.Valid)
@@ -580,7 +585,7 @@ namespace WhMgr.Commands
             }
 
             await ctx.RespondEmbed(Translator.Instance.Translate("SUCCESS_POKEMON_SUBSCRIPTIONS_UNSUBSCRIBE").FormatText(ctx.User.Username, string.Join("**, **", pokemonNames)));
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         #endregion
@@ -598,12 +603,12 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            if (!_whConfig.Instance.Servers.ContainsKey(guildId))
                 return;
 
-            var server = _dep.WhConfig.Servers[guildId];
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var server = _whConfig.Instance.Servers[guildId];
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             // Check subscription limits
             if (server.Subscriptions.MaxRaidSubscriptions > 0 && subscription.Raids.Count >= server.Subscriptions.MaxRaidSubscriptions)
             {
@@ -660,7 +665,7 @@ namespace WhMgr.Commands
                     ? Translator.Instance.Translate("SUBSCRIPTIONS_FROM_ALL_CITIES")
                     : Translator.Instance.Translate("SUBSCRIPTIONS_FROM_CITY").FormatText(city))
             );
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         [
@@ -674,8 +679,8 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             if (subscription == null || subscription?.Raids.Count == 0)
             {
                 await ctx.TriggerTypingAsync();
@@ -698,7 +703,7 @@ namespace WhMgr.Commands
 
                 await ctx.TriggerTypingAsync();
                 await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_SUCCESS_REMOVE_ALL_RAID_SUBSCRIPTIONS").FormatText(ctx.User.Username));
-                _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+                _subProcessor.Manager.ReloadSubscriptions();
                 return;
             }
 
@@ -709,7 +714,7 @@ namespace WhMgr.Commands
                 return;
             }
 
-            var areas = SubscriptionAreas.GetAreas(_dep.WhConfig.Servers[guildId], city);
+            var areas = SubscriptionAreas.GetAreas(_whConfig.Instance.Servers[guildId], city);
             foreach (var item in validation.Valid)
             {
                 var pokemonId = item.Key;
@@ -752,7 +757,7 @@ namespace WhMgr.Commands
                     ? Translator.Instance.Translate("SUBSCRIPTIONS_FROM_ALL_CITIES")
                     : Translator.Instance.Translate("SUBSCRIPTIONS_FROM_CITY").FormatText(string.Join(", ", areas)))
             );
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         #endregion
@@ -770,12 +775,12 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            if (!_whConfig.Instance.Servers.ContainsKey(guildId))
                 return;
 
-            var server = _dep.WhConfig.Servers[guildId];
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var server = _whConfig.Instance.Servers[guildId];
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             // Check subscription limits
             if (server.Subscriptions.MaxQuestSubscriptions > 0 && subscription.Quests.Count >= server.Subscriptions.MaxQuestSubscriptions)
             {
@@ -820,7 +825,7 @@ namespace WhMgr.Commands
                     ? Translator.Instance.Translate("SUBSCRIPTIONS_FROM_ALL_CITIES")
                     : Translator.Instance.Translate("SUBSCRIPTIONS_FROM_CITY").FormatText(city))
             );
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         [
@@ -834,8 +839,8 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             if (subscription == null || subscription?.Quests.Count == 0)
             {
                 await ctx.TriggerTypingAsync();
@@ -863,11 +868,11 @@ namespace WhMgr.Commands
                 subscription.Quests.ForEach(x => x.Id.Remove<QuestSubscription>());
                 await ctx.TriggerTypingAsync();
                 await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_CONFIRM_SUCCESS_ALL_QUEST_SUBSCRIPTIONS").FormatText(ctx.User.Username));
-                _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+                _subProcessor.Manager.ReloadSubscriptions();
                 return;
             }
 
-            var areas = SubscriptionAreas.GetAreas(_dep.WhConfig.Servers[guildId], city);
+            var areas = SubscriptionAreas.GetAreas(_whConfig.Instance.Servers[guildId], city);
             var subQuest = subscription.Quests.FirstOrDefault(x => string.Compare(x.RewardKeyword, rewardKeyword, true) == 0);
             // Check if subscribed
             if (subQuest == null)
@@ -905,7 +910,7 @@ namespace WhMgr.Commands
                     ? Translator.Instance.Translate("SUBSCRIPTIONS_FROM_ALL_CITIES")
                     : Translator.Instance.Translate("SUBSCRIPTIONS_FROM_CITY").FormatText(city))
             );
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         #endregion
@@ -922,12 +927,12 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            if (!_whConfig.Instance.Servers.ContainsKey(guildId))
                 return;
 
-            var server = _dep.WhConfig.Servers[guildId];
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var server = _whConfig.Instance.Servers[guildId];
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             // Check subscription limits
             if (server.Subscriptions.MaxGymSubscriptions > 0 && subscription.Gyms.Count >= server.Subscriptions.MaxGymSubscriptions)
             {
@@ -952,7 +957,7 @@ namespace WhMgr.Commands
             subscription.Save();
 
             await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_GYM_SUBSCRIPTION_ADDED").FormatText(ctx.User.Username, gymName));
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         [
@@ -965,9 +970,9 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             if (string.Compare(Strings.All, gymName, true) == 0)
             {
                 var result = await ctx.Confirm(Translator.Instance.Translate("NOTIFY_CONFIRM_REMOVE_ALL_GYM_SUBSCRIPTIONS").FormatText(ctx.User.Username, subscription.Gyms.Count.ToString("N0")));
@@ -976,7 +981,7 @@ namespace WhMgr.Commands
 
                 subscription.Gyms.ForEach(x => x.Id.Remove<GymSubscription>());
                 await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_SUCCESS_REMOVE_ALL_GYM_SUBSCRIPTIONS").FormatText(ctx.User.Username));
-                _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+                _subProcessor.Manager.ReloadSubscriptions();
                 return;
             }
 
@@ -985,7 +990,7 @@ namespace WhMgr.Commands
                 .ToList()?
                 .ForEach(x => x.Id.Remove<GymSubscription>());
             await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_GYM_SUBSCRIPTION_REMOVED").FormatText(ctx.User.Username, gymName));
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         #endregion
@@ -1003,12 +1008,12 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            if (!_whConfig.Instance.Servers.ContainsKey(guildId))
                 return;
 
-            var server = _dep.WhConfig.Servers[guildId];
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var server = _whConfig.Instance.Servers[guildId];
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             // Check subscription limits
             if (server.Subscriptions.MaxInvasionSubscriptions > 0 && subscription.Invasions.Count >= server.Subscriptions.MaxInvasionSubscriptions)
             {
@@ -1065,7 +1070,7 @@ namespace WhMgr.Commands
                     ? Translator.Instance.Translate("SUBSCRIPTIONS_FROM_ALL_CITIES")
                     : Translator.Instance.Translate("SUBSCRIPTIONS_FROM_CITY").FormatText(city))
             );
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         [
@@ -1079,8 +1084,8 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             if (subscription == null || subscription?.Invasions.Count == 0)
             {
                 await ctx.TriggerTypingAsync();
@@ -1102,7 +1107,7 @@ namespace WhMgr.Commands
 
                 await ctx.TriggerTypingAsync();
                 await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_SUCCESS_REMOVE_ALL_INVASION_SUBSCRIPTIONS").FormatText(ctx.User.Username));
-                _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+                _subProcessor.Manager.ReloadSubscriptions();
                 return;
             }
 
@@ -1113,7 +1118,7 @@ namespace WhMgr.Commands
                 return;
             }
 
-            var areas = SubscriptionAreas.GetAreas(_dep.WhConfig.Servers[guildId], city);
+            var areas = SubscriptionAreas.GetAreas(_whConfig.Instance.Servers[guildId], city);
             foreach (var item in validation.Valid)
             {
                 var pokemonId = item.Key;
@@ -1157,7 +1162,7 @@ namespace WhMgr.Commands
                     : Translator.Instance.Translate("SUBSCRIPTIONS_FROM_CITY").FormatText(city))
             );
 
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         public static PokemonType GetPokemonTypeFromString(string pokemonType)
@@ -1223,11 +1228,11 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            if (!_whConfig.Instance.Servers.ContainsKey(guildId))
                 return;
 
-            var server = _dep.WhConfig.Servers[guildId];
+            var server = _whConfig.Instance.Servers[guildId];
             var pvpLeague = string.Compare(league, "great", true) == 0 ?
                 PvPLeague.Great :
                 string.Compare(league, "ultra", true) == 0 ?
@@ -1255,7 +1260,7 @@ namespace WhMgr.Commands
                 return;
             }
 
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             // Check subscription limits
             if (server.Subscriptions.MaxPvPSubscriptions > 0 && subscription.PvP.Count >= server.Subscriptions.MaxPvPSubscriptions)
             {
@@ -1355,7 +1360,7 @@ namespace WhMgr.Commands
                     ? $"\r\n{ctx.User.Username} is already subscribed to **{(isAll || isGen ? "All" : string.Join("**, **", alreadySubscribed))}** notifications with a minimum {pvpLeague} League PvP ranking of '{minimumRank}' or higher and a minimum ranking percentage of {minimumPercent}% and from the following areas: {(areas.Count == server.CityRoles.Count ? Strings.All : string.Join(", ", areas))}."
                     : string.Empty)
             );
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         [
@@ -1370,9 +1375,9 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             if (subscription == null || subscription?.PvP?.Count == 0)
             {
                 await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_NO_POKEMON_SUBSCRIPTIONS").FormatText(ctx.User.Username), DiscordColor.Red);
@@ -1405,7 +1410,7 @@ namespace WhMgr.Commands
                     .ForEach(x => x.Id.Remove<PvPSubscription>());
 
                 await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_SUCCESS_REMOVE_ALL_PVP_SUBSCRIPTIONS").FormatText(ctx.User.Username, pvpLeague));
-                _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+                _subProcessor.Manager.ReloadSubscriptions();
                 return;
             }
 
@@ -1416,9 +1421,9 @@ namespace WhMgr.Commands
                 return;
             }
 
-            var areas = SubscriptionAreas.GetAreas(_dep.WhConfig.Servers[guildId], city);
+            var areas = SubscriptionAreas.GetAreas(_whConfig.Instance.Servers[guildId], city);
             await RemovePvPSubscription(ctx, subscription, validation, pvpLeague, areas);
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         #endregion
@@ -1436,12 +1441,12 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            if (!_whConfig.Instance.Servers.ContainsKey(guildId))
                 return;
 
-            var server = _dep.WhConfig.Servers[guildId];
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var server = _whConfig.Instance.Servers[guildId];
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             // Check subscription limits
             if (server.Subscriptions.MaxLureSubscriptions > 0 && subscription.Lures.Count >= server.Subscriptions.MaxLureSubscriptions)
             {
@@ -1491,7 +1496,7 @@ namespace WhMgr.Commands
                     ? Translator.Instance.Translate("SUBSCRIPTIONS_FROM_ALL_CITIES")
                     : Translator.Instance.Translate("SUBSCRIPTIONS_FROM_CITY").FormatText(city))
             );
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         [
@@ -1505,8 +1510,8 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             if (subscription == null || subscription?.Lures.Count == 0)
             {
                 await ctx.RespondEmbed(Translator.Instance.Translate("ERROR_NO_LURE_SUBSCRIPTIONS").FormatText(ctx.User.Username, string.IsNullOrEmpty(city)
@@ -1526,11 +1531,11 @@ namespace WhMgr.Commands
                 subscription.Lures.ForEach(x => x.Id.Remove<LureSubscription>());
 
                 await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_SUCCESS_REMOVE_ALL_LURE_SUBSCRIPTIONS").FormatText(ctx.User.Username));
-                _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+                _subProcessor.Manager.ReloadSubscriptions();
                 return;
             }
 
-            var areas = SubscriptionAreas.GetAreas(_dep.WhConfig.Servers[guildId], city);
+            var areas = SubscriptionAreas.GetAreas(_whConfig.Instance.Servers[guildId], city);
             var lures = GetLures(lureTypes);
             foreach (var lureType in lures)
             {
@@ -1573,7 +1578,7 @@ namespace WhMgr.Commands
                     : Translator.Instance.Translate("SUBSCRIPTIONS_FROM_CITY").FormatText(city))
             );
 
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         #endregion
@@ -1589,12 +1594,12 @@ namespace WhMgr.Commands
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            if (!_whConfig.Instance.Servers.ContainsKey(guildId))
                 return;
 
-            var server = _dep.WhConfig.Servers[guildId];
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var server = _whConfig.Instance.Servers[guildId];
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
 
             var subType = await ctx.GetSubscriptionTypeSelection();
             // TODO: Maybe show current settings for selected info
@@ -1910,7 +1915,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
                         subscription.Save();
 
                         await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_GYM_SUBSCRIPTION_ADDED").FormatText(ctx.User.Username, gymName));
-                        _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+                        _subProcessor.Manager.ReloadSubscriptions();
                     }
                     break;
                     #endregion
@@ -1918,7 +1923,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
                     await ctx.RespondEmbed($"Invalid entry specified, please try again...", DiscordColor.Red);
                     break;
             }
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         private async Task<KeyValuePair<List<string>, List<string>>> AddPokemonSubscription(CommandContext ctx, SubscriptionObject subscription, PokemonValidation validation, IVResult ivResult, int minLevel, int maxLevel, string gender, List<string> areas)
@@ -1935,7 +1940,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
 
                 var pokemon = MasterFile.Instance.Pokedex[pokemonId];
                 var name = string.IsNullOrEmpty(form) ? pokemon.Name : pokemon.Name + "-" + form;
-                var isModOrHigher = await ctx.Client.IsModeratorOrHigher(ctx.User.Id, subscription.GuildId, _dep.WhConfig);
+                var isModOrHigher = await ctx.Client.IsModeratorOrHigher(ctx.User.Id, subscription.GuildId, _whConfig.Instance);
 
                 // Check if common type pokemon e.g. Pidgey, Ratatta, Spinarak 'they are beneath him and he refuses to discuss them further'
                 if (pokemonId.IsCommonPokemon() && ivResult.IV < Strings.CommonTypeMinimumIV && !isModOrHigher)
@@ -2126,12 +2131,12 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
-            if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
+            if (!_whConfig.Instance.Servers.ContainsKey(guildId))
                 return;
 
-            var server = _dep.WhConfig.Servers[guildId];
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var server = _whConfig.Instance.Servers[guildId];
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
 
             var subType = await ctx.GetSubscriptionTypeSelection();
             // TODO: Maybe show current settings for selected info
@@ -2215,7 +2220,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
                             subscription.Quests.ForEach(x => x.Id.Remove<QuestSubscription>());
                             await ctx.TriggerTypingAsync();
                             await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_CONFIRM_SUCCESS_ALL_QUEST_SUBSCRIPTIONS").FormatText(ctx.User.Username));
-                            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+                            _subProcessor.Manager.ReloadSubscriptions();
                             return;
                         }
 
@@ -2333,7 +2338,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
 
                             subscription.Gyms.ForEach(x => x.Id.Remove<GymSubscription>());
                             await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_SUCCESS_REMOVE_ALL_GYM_SUBSCRIPTIONS").FormatText(ctx.User.Username));
-                            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+                            _subProcessor.Manager.ReloadSubscriptions();
                             return;
                         }
 
@@ -2350,7 +2355,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
                     break;
             }
 
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         private async Task RemovePokemonSubscription(CommandContext ctx, SubscriptionObject subscription, PokemonValidation validation, List<string> areas)
@@ -2446,7 +2451,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
 
         private async Task RemoveRaidSubscription(CommandContext ctx, SubscriptionObject subscription, PokemonValidation validation, List<string> areas)
         {
-            var server = _dep.WhConfig.Servers[subscription.GuildId];
+            var server = _whConfig.Instance.Servers[subscription.GuildId];
             foreach (var item in validation.Valid)
             {
                 var pokemonId = item.Key;
@@ -2506,7 +2511,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
             if (string.IsNullOrEmpty(mention))
             {
@@ -2525,7 +2530,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
                 return;
             }
 
-            var isModOrHigher = await ctx.Client.IsModeratorOrHigher(ctx.User.Id, guildId, _dep.WhConfig);
+            var isModOrHigher = await ctx.Client.IsModeratorOrHigher(ctx.User.Id, guildId, _whConfig.Instance);
             if (!isModOrHigher)
             {
                 await ctx.RespondEmbed(Translator.Instance.Translate("MSG_NOT_MODERATOR_OR_HIGHER").FormatText(ctx.User.Mention), DiscordColor.Red);
@@ -2558,7 +2563,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
 
             // TODO: Localize
             await ctx.RespondEmbed($"{ctx.User.Username} has cleared all of {user.Username}'s subscriptions", DiscordColor.Green);
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         #endregion
@@ -2574,14 +2579,15 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
             await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_IMPORT_UPLOAD_FILE").FormatText(ctx.User.Username));
-            var xc = await _dep.Interactivity.WaitForMessageAsync(x => x.Author.Id == ctx.User.Id && x.Attachments.Count > 0, TimeSpan.FromSeconds(180));
-            if (xc == null)
+            var interactivity = (InteractivityExtension)ctx.Services.GetService(typeof(InteractivityExtension));
+            var xc = await interactivity.WaitForMessageAsync(x => x.Author.Id == ctx.User.Id && x.Attachments.Count > 0, TimeSpan.FromSeconds(180));
+            if (string.IsNullOrEmpty(xc.Result.Content))
                 return;
 
-            var attachment = xc.Message.Attachments[0];
+            var attachment = xc.Result.Attachments.FirstOrDefault();
             if (attachment == null)
                 return;
 
@@ -2592,7 +2598,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
                 return;
             }
 
-            var oldSubscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var oldSubscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             if (oldSubscription != null)
             {
                 var result = SubscriptionManager.RemoveAllUserSubscriptions(guildId, ctx.User.Id);
@@ -2621,9 +2627,9 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             if (subscription == null)
             {
                 await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_EXPORT_NO_SUBSCRIPTIONS").FormatText(ctx.User.Username), DiscordColor.Red);
@@ -2650,13 +2656,13 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
             var description = "**Available Icon Styles:**\r\n" +
-                    $"- {string.Join($"{Environment.NewLine}- ", _dep.WhConfig.IconStyles.Keys)}" +
+                    $"- {string.Join($"{Environment.NewLine}- ", _whConfig.Instance.IconStyles.Keys)}" +
                     Environment.NewLine +
                     Environment.NewLine +
-                    $"*Type `{_dep.WhConfig.Servers[guildId].CommandPrefix}set-icons iconStyle` to use that icon style when receiving notifications from {Strings.BotName}.*";
+                    $"*Type `{_whConfig.Instance.Servers[guildId].CommandPrefix}set-icons iconStyle` to use that icon style when receiving notifications from {Strings.BotName}.*";
             var eb = new DiscordEmbedBuilder
             {
                 Color = DiscordColor.Green,
@@ -2682,15 +2688,15 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
             if (!await CanExecute(ctx))
                 return;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x));
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.Keys.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x));
 
-            if (!_dep.WhConfig.IconStyles.Select(x => x.Key.ToLower()).Contains(iconStyle.ToLower()))
+            if (!_whConfig.Instance.IconStyles.Select(x => x.Key.ToLower()).Contains(iconStyle.ToLower()))
             {
-                await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_INVALID_ICON_STYLE").FormatText(ctx.User.Username, _dep.WhConfig.Servers[guildId].CommandPrefix), DiscordColor.Red);
+                await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_INVALID_ICON_STYLE").FormatText(ctx.User.Username, _whConfig.Instance.Servers[guildId].CommandPrefix), DiscordColor.Red);
                 return;
             }
 
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, ctx.User.Id);
             if (subscription == null)
             {
                 await ctx.RespondEmbed(Translator.Instance.Translate("MSG_USER_NOT_SUBSCRIBED").FormatText(ctx.User.Username), DiscordColor.Red);
@@ -2701,7 +2707,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
             subscription.Save();
 
             await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_ICON_STYLE_CHANGE").FormatText(ctx.User.Username, iconStyle));
-            _dep.SubscriptionProcessor.Manager.ReloadSubscriptions();
+            _subProcessor.Manager.ReloadSubscriptions();
         }
 
         #endregion
@@ -2717,7 +2723,10 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
             {
                 Title = $"{DateTime.Now.ToLongDateString()} Statistics",
                 Color = DiscordColor.Blurple,
-                ThumbnailUrl = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQdNi3XTIwl8tkN_D6laRdexk0fXJ-fMr0C_s4ju-bXw2kcDSRI"
+                Thumbnail = new DiscordEmbedBuilder.EmbedThumbnail
+                {
+                    Url = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQdNi3XTIwl8tkN_D6laRdexk0fXJ-fMr0C_s4ju-bXw2kcDSRI",
+                },
             };
 
             var sb = new StringBuilder();
@@ -2774,7 +2783,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
 
         private async Task EnableDisableUserSubscriptions(CommandContext ctx, DiscordUser user, ulong guildId)
         {
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, user.Id);
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, user.Id);
             if (subscription == null)
             {
                 await ctx.TriggerTypingAsync();
@@ -2790,7 +2799,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
             await ctx.RespondEmbed(Translator.Instance.Translate("NOTIFY_ENABLE_DISABLE").FormatText(user.Username, cmd));
         }
 
-        private async Task SendUserSubscriptionSettings(DiscordClient client, DiscordUser receiver, DiscordUser user, ulong guildId)
+        private async Task SendUserSubscriptionSettings(DiscordClient client, DiscordMember receiver, DiscordUser user, ulong guildId)
         {
             var messages = await BuildUserSubscriptionSettings(client, user, guildId);
             for (var i = 0; i < messages.Count; i++)
@@ -2807,7 +2816,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
                         Text = $"{Strings.Creator} | {DateTime.Now}"
                     }
                 };
-                await client.SendDirectMessage(receiver, eb.Build());
+                await receiver.SendDirectMessage(eb.Build());
             }
         }
 
@@ -2821,11 +2830,11 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
                 return new List<string> { error };
             }
 
-            if (!_dep.WhConfig.Servers.ContainsKey(guildId))
+            if (!_whConfig.Instance.Servers.ContainsKey(guildId))
                 return null;
 
-            var server = _dep.WhConfig.Servers[guildId];
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, user.Id);
+            var server = _whConfig.Instance.Servers[guildId];
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, user.Id);
             var isSubbed = subscription?.Pokemon.Count > 0 || subscription?.PvP.Count > 0 || subscription?.Raids.Count > 0 || subscription?.Quests.Count > 0 || subscription?.Invasions.Count > 0 || subscription?.Gyms.Count > 0 || subscription?.Lures.Count > 0;
             var hasPokemon = isSubbed && subscription?.Pokemon?.Count > 0;
             var hasPvP = isSubbed && subscription?.PvP?.Count > 0;
@@ -2835,9 +2844,9 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
             var hasInvasions = isSubbed && subscription?.Invasions?.Count > 0;
             var hasLures = isSubbed && subscription?.Lures?.Count > 0;
             var messages = new List<string>();
-            var isSupporter = await client.IsSupporterOrHigher(user.Id, guildId, _dep.WhConfig);
+            var isSupporter = await client.IsSupporterOrHigher(user.Id, guildId, _whConfig.Instance);
 
-            var feeds = member?.Roles?.Select(x => x.Name).Where(x => _dep.WhConfig.Servers[guildId].CityRoles.Contains(x))?.ToList();
+            var feeds = member?.Roles?.Select(x => x.Name).Where(x => _whConfig.Instance.Servers[guildId].CityRoles.Contains(x))?.ToList();
             if (feeds == null)
                 return messages;
             feeds.Sort();
@@ -2981,7 +2990,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
         private List<string> GetPvPSubscriptionNames(ulong guildId, ulong userId)
         {
             var list = new List<string>();
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, userId);
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, userId);
             var subscribedPvP = subscription.PvP;
             subscribedPvP.Sort((x, y) => x.PokemonId.CompareTo(y.PokemonId));
 
@@ -3027,10 +3036,10 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
         private List<string> GetRaidSubscriptionNames(ulong guildId, ulong userId)
         {
             var list = new List<string>();
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, userId);
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, userId);
             var subscribedRaids = subscription.Raids;
             subscribedRaids.Sort((x, y) => x.PokemonId.CompareTo(y.PokemonId));
-            var cityRoles = _dep.WhConfig.Servers[guildId].CityRoles.Select(x => x.ToLower());
+            var cityRoles = _whConfig.Instance.Servers[guildId].CityRoles.Select(x => x.ToLower());
 
             foreach (var raid in subscribedRaids)
             {
@@ -3051,7 +3060,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
         private List<string> GetGymSubscriptionNames(ulong guildId, ulong userId)
         {
             var list = new List<string>();
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, userId);
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, userId);
             var subscribedGyms = subscription.Gyms;
             subscribedGyms.Sort((x, y) => x.Name.CompareTo(y.Name));
             foreach (var gym in subscribedGyms)
@@ -3065,10 +3074,10 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
         private List<string> GetQuestSubscriptionNames(ulong guildId, ulong userId)
         {
             var list = new List<string>();
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, userId);
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, userId);
             var subscribedQuests = subscription.Quests;
             subscribedQuests.Sort((x, y) => string.Compare(x.RewardKeyword.ToLower(), y.RewardKeyword.ToLower(), true));
-            var cityRoles = _dep.WhConfig.Servers[guildId].CityRoles.Select(x => x.ToLower());
+            var cityRoles = _whConfig.Instance.Servers[guildId].CityRoles.Select(x => x.ToLower());
 
             foreach (var quest in subscribedQuests)
             {
@@ -3082,10 +3091,10 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
         private List<string> GetInvasionSubscriptionNames(ulong guildId, ulong userId)
         {
             var list = new List<string>();
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, userId);
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, userId);
             var subscribedInvasions = subscription.Invasions;
             subscribedInvasions.Sort((x, y) => string.Compare(MasterFile.GetPokemon(x.RewardPokemonId, 0).Name, MasterFile.GetPokemon(y.RewardPokemonId, 0).Name, true));
-            var cityRoles = _dep.WhConfig.Servers[guildId].CityRoles.Select(x => x.ToLower());
+            var cityRoles = _whConfig.Instance.Servers[guildId].CityRoles.Select(x => x.ToLower());
 
             foreach (var invasion in subscribedInvasions)
             {
@@ -3099,10 +3108,10 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
         private List<string> GetLureSubscriptionNames(ulong guildId, ulong userId)
         {
             var list = new List<string>();
-            var subscription = _dep.SubscriptionProcessor.Manager.GetUserSubscriptions(guildId, userId);
+            var subscription = _subProcessor.Manager.GetUserSubscriptions(guildId, userId);
             var subscribedLures = subscription.Lures;
             subscribedLures.Sort((x, y) => x.LureType.CompareTo(y.LureType));
-            var cityRoles = _dep.WhConfig.Servers[guildId].CityRoles.Select(x => x.ToLower());
+            var cityRoles = _whConfig.Instance.Servers[guildId].CityRoles.Select(x => x.ToLower());
 
             foreach (var lure in subscribedLures)
             {
@@ -3115,7 +3124,7 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
 
         private DiscordEmbedBuilder BuildExpirationMessage(ulong guildId, DiscordUser user)
         {
-            var customerData = _dep.Stripe.GetCustomerData(guildId, user.Id);
+            var customerData = _stripe.GetCustomerData(guildId, user.Id);
             if (!customerData.ExpireDate.HasValue)
             {
                 return null;
@@ -3143,20 +3152,20 @@ and only from the following areas: {(areasResult.Count == server.CityRoles.Count
 
         private async Task<bool> CanExecute(CommandContext ctx)
         {
-            if (!await ctx.IsDirectMessageSupported(_dep.WhConfig))
+            if (!await ctx.IsDirectMessageSupported(_whConfig.Instance))
                 return false;
 
-            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.FirstOrDefault(x => _dep.WhConfig.Servers.ContainsKey(x.Key)).Key;
-            if (guildId == 0 || !_dep.WhConfig.Servers.ContainsKey(guildId))
+            var guildId = ctx.Guild?.Id ?? ctx.Client.Guilds.FirstOrDefault(x => _whConfig.Instance.Servers.ContainsKey(x.Key)).Key;
+            if (guildId == 0 || !_whConfig.Instance.Servers.ContainsKey(guildId))
                 return false;
 
-            if (!_dep.WhConfig.Servers[guildId].Subscriptions.Enabled)
+            if (!_whConfig.Instance.Servers[guildId].Subscriptions.Enabled)
             {
                 await ctx.RespondEmbed(string.Format(Translator.Instance.Translate("MSG_SUBSCRIPTIONS_NOT_ENABLED"), ctx.User.Username), DiscordColor.Red);
                 return false;
             }
 
-            var isSupporter = await ctx.Client.IsSupporterOrHigher(ctx.User.Id, guildId, _dep.WhConfig);
+            var isSupporter = await ctx.Client.IsSupporterOrHigher(ctx.User.Id, guildId, _whConfig.Instance);
             if (!isSupporter)
             {
                 await ctx.DonateUnlockFeaturesMessage();

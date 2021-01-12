@@ -11,6 +11,7 @@
     using DSharpPlus.Entities;
     using ServiceStack.OrmLite;
 
+    using WhMgr.Configuration;
     using WhMgr.Data;
     using WhMgr.Diagnostics;
     using WhMgr.Extensions;
@@ -23,15 +24,15 @@
         Hidden,
         RequirePermissions(Permissions.KickMembers)
     ]
-    public class Event
+    public class Event : BaseCommandModule
     {
         private static readonly IEventLogger _logger = EventLogger.GetLogger("COMMUNITYDAY", Program.LogLevel);
 
-        private readonly Dependencies _dep;
+        private readonly WhConfigHolder _whConfig;
 
-        public Event(Dependencies dep)
+        public Event(WhConfigHolder whConfig)
         {
-            _dep = dep;
+            _whConfig = whConfig;
         }
 
         [
@@ -53,9 +54,9 @@
                 }
             };
             var pkmnNames = new List<string>();
-            for (var i = 0; i < _dep.WhConfig.EventPokemonIds.Count; i++)
+            for (var i = 0; i < _whConfig.Instance.EventPokemonIds.Count; i++)
             {
-                var pkmnId = _dep.WhConfig.EventPokemonIds[i];
+                var pkmnId = _whConfig.Instance.EventPokemonIds[i];
                 if (MasterFile.Instance.Pokedex.ContainsKey(pkmnId))
                 {
                     pkmnNames.Add(pkmnId + ":" + MasterFile.Instance.Pokedex[pkmnId].Name);
@@ -89,8 +90,8 @@
                 pkmnFailed.Add(eventPokemonId);
             }
 
-            _dep.WhConfig.EventPokemonIds = pkmnToAdd;
-            _dep.WhConfig.Save(_dep.WhConfig.FileName);
+            _whConfig.Instance.EventPokemonIds = pkmnToAdd;
+            _whConfig.Instance.Save(_whConfig.Instance.FileName);
 
             var pkmnNames = new List<string>();
             for (var i = 0; i < pkmnToAdd.Count; i++)
@@ -133,8 +134,8 @@
                 pkmnFailed.Add(eventPokemonId);
             }
 
-            _dep.WhConfig.EventPokemonIds.AddRange(pkmnToAdd);
-            _dep.WhConfig.Save(_dep.WhConfig.FileName);
+            _whConfig.Instance.EventPokemonIds.AddRange(pkmnToAdd);
+            _whConfig.Instance.Save(_whConfig.Instance.FileName);
 
             var pkmnNames = new List<string>();
             for (var i = 0; i < pkmnToAdd.Count; i++)
@@ -177,8 +178,8 @@
                 pkmnFailed.Add(eventPokemonId);
             }
 
-            pkmnToRemove.ForEach(x => _dep.WhConfig.EventPokemonIds.Remove(x));
-            _dep.WhConfig.Save(_dep.WhConfig.FileName);
+            pkmnToRemove.ForEach(x => _whConfig.Instance.EventPokemonIds.Remove(x));
+            _whConfig.Instance.Save(_whConfig.Instance.FileName);
 
             var pkmnNames = new List<string>();
             for (var i = 0; i < pkmnToRemove.Count; i++)
